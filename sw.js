@@ -1,5 +1,5 @@
 // Cambia el número de versión cada vez que publiques cambios importantes.
-const V = "fesc-v1";
+const V = "fesc-v2";
 const SHELL = ["./", "index.html", "app.js", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"];
 const CDN = ["cdn.tailwindcss.com"];
 

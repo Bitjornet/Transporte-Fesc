@@ -5,35 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Transporte FES Cuautitlán</title>
 <meta name="description" content="Horarios del transporte de la FES Cuautitlán, UNAM: Campo Uno, Campo Cuatro e Intercampus.">
+<meta name="color-scheme" content="dark">
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0b5cad" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#070b1f">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Transporte FESC">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
 
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 </head>
-<body class="bg-zinc-100 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+<body class="min-h-screen bg-[#070b1f] bg-fixed text-white antialiased bg-[radial-gradient(circle_at_15%_0%,rgba(80,110,255,.25),transparent_45%),radial-gradient(circle_at_90%_55%,rgba(140,70,220,.18),transparent_45%)]">
 <main class="mx-auto max-w-2xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-  <header class="mb-5 flex flex-wrap items-baseline justify-between gap-x-3">
-    <h1 class="text-2xl font-extrabold tracking-tight">Transporte FES Cuautitlán</h1>
-    <p id="clock" class="text-sm font-medium tabular-nums text-zinc-500 dark:text-zinc-400"></p>
+  <header class="mb-7 rounded-3xl bg-white/5 p-5 ring-1 ring-white/10 backdrop-blur">
+    <div class="flex items-center gap-4">
+      <div class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/10 text-3xl" aria-hidden="true">🚌</div>
+      <div>
+        <h1 class="text-2xl font-extrabold leading-tight tracking-tight">Transporte FES Cuautitlán</h1>
+        <p class="text-sm text-white/60">Todos los horarios en un solo lugar</p>
+      </div>
+    </div>
+    <p id="clock" class="mt-4 text-sm font-medium tabular-nums text-white/60"></p>
   </header>
 
+  <p class="mb-2 px-1 text-xs font-bold uppercase tracking-[.2em] text-white/50">¿A dónde vas?</p>
   <nav id="campus" class="mb-3 flex gap-2" aria-label="Campus"></nav>
   <nav id="routes" class="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1" aria-label="Rutas"></nav>
-  <section id="info" class="mb-4 px-1"></section>
-  <nav id="days" class="mb-4 flex gap-2" aria-label="Tipo de día"></nav>
+  <section id="info" class="mb-6 px-1"></section>
+
+  <p class="mb-2 px-1 text-xs font-bold uppercase tracking-[.2em] text-white/50">Día</p>
+  <nav id="days" class="mb-5 flex gap-2" aria-label="Tipo de día"></nav>
   <div id="dirs" class="space-y-4"></div>
 
-  <footer class="mt-8 px-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-    Fuente: horarios de la Secretaría de Atención a la Comunidad, FES Cuautitlán, UNAM. Fecha de modificación: 12 de octubre de 2026.Si no presentas tu identificación UNAM, se te puede negar el acceso al transporte.
+  <footer class="mt-8 px-1 text-xs leading-relaxed text-white/40">
+    Fuente: horarios de la Secretaría de Atención a la Comunidad, FES Cuautitlán, UNAM. Fecha de modificación: 12 de octubre de 2026. Se asume que los horarios sin etiqueta aplican de lunes a viernes. Si no presentas tu identificación UNAM, se te puede negar el acceso al transporte. Confirma cualquier cambio con la Secretaría de Atención a la Comunidad.
   </footer>
 </main>
 

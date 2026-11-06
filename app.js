@@ -44,10 +44,11 @@ function $(i){return document.getElementById(i)}
 function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
 
 // ====== ESTILOS (clases Tailwind) ======
-var BTN_ON="bg-zinc-900 text-white dark:bg-white dark:text-zinc-900";
-var BTN_OFF="bg-white text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800";
-var BTN_BASE="rounded-xl px-3 py-3 text-sm font-semibold transition active:scale-[.98] ";
-var CARD="rounded-2xl bg-white p-4 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800";
+var BTN_ON="bg-white/20 text-white ring-1 ring-white/40";
+var BTN_OFF="bg-white/5 text-white/60 ring-1 ring-white/10";
+var BTN_BASE="rounded-2xl px-3 py-3.5 text-sm font-semibold backdrop-blur transition active:scale-[.97] ";
+var GRAD={c4:"from-[#b45309] to-[#6b2d0a]",c1:"from-[#1f55b5] to-[#0e2763]",ic:"from-[#5b3fb5] to-[#2a1c66]"};
+var EMPTY="rounded-2xl border border-dashed border-white/20 p-3 text-sm text-white/60";
 
 // ====== ESTADO ======
 var camp="c4",rid="sub-c4",view=dk(new Date());
@@ -65,11 +66,11 @@ function render(){
   },c,"flex-1")});
   var rs=$("routes");rs.textContent="";
   ROUTES.filter(function(r){return r.campus===camp}).forEach(function(r){
-    btn(r.name,r.id===rid,function(){rid=r.id;render()},rs,"shrink-0 whitespace-nowrap rounded-full");
+    btn(r.name,r.id===rid,function(){rid=r.id;render()},rs,"shrink-0 whitespace-nowrap rounded-full px-5");
   });
   var r=route(),inf=$("info");inf.textContent="";
   inf.appendChild(el("p","text-lg font-bold","Tarifa plana: "+r.fare));
-  if(r.fn)inf.appendChild(el("p","mt-1 text-sm text-zinc-500 dark:text-zinc-400",r.fn));
+  if(r.fn)inf.appendChild(el("p","mt-1 text-sm leading-relaxed text-white/60",r.fn));
   var d=$("days");d.textContent="";
   ["week","sat","sun"].forEach(function(k){btn(DL[k],k===view,function(){view=k;render()},d,"flex-1")});
   renderDirs();
@@ -79,43 +80,50 @@ function renderDirs(){
   var r=route(),box=$("dirs"),realDay=dk(new Date()),m=nowMin(),isToday=(view===realDay);
   box.textContent="";
   r.dirs.forEach(function(d,i){
-    var card=el("article",CARD);
-    card.appendChild(el("h3","font-bold leading-snug",d.t));
-    if(d.p)card.appendChild(el("p","mt-0.5 text-sm text-zinc-500 dark:text-zinc-400",d.p));
-    var body=el("div","mt-3");
+    var num="0"+(i+1);
+    var card=el("article","relative overflow-hidden rounded-3xl bg-gradient-to-br "+GRAD[r.campus]+" p-5 ring-1 ring-white/10");
+    card.appendChild(el("span","pointer-events-none absolute -bottom-4 right-3 select-none text-8xl font-black text-white/10",num));
+    var in_=el("div","relative");
+    in_.appendChild(el("div","mb-4 grid h-11 w-11 place-items-center rounded-2xl bg-white/15 text-xl","🚌"));
+    in_.appendChild(el("p","text-xs font-bold tracking-[.2em] text-white/50",num));
+    in_.appendChild(el("h3","text-lg font-bold leading-snug",d.t));
+    if(d.p)in_.appendChild(el("p","mt-0.5 text-sm text-white/60",d.p));
+    var body=el("div","mt-4");
     if(d.x){
-      body.appendChild(el("p","rounded-xl border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400",d.x));
+      body.appendChild(el("p",EMPTY,d.x));
     }else{
       var list=tm(view==="sat"?d.s:view==="week"?d.w:"");
       // Contador: solo si el día seleccionado es el día real del dispositivo
       if(isToday){
-        var n=el("div","mb-3 flex flex-wrap items-baseline gap-x-3 rounded-xl bg-blue-600 px-4 py-3 text-white");
+        var n=el("div","mb-3 flex flex-wrap items-baseline gap-x-3 rounded-2xl bg-black/25 px-4 py-3 ring-1 ring-white/10");
         var nx=list.filter(function(t){return t>=m})[0];
         if(!list.length)n.appendChild(el("span","text-sm font-medium","Hoy no hay servicio"));
         else if(nx==null)n.appendChild(el("span","text-sm font-medium","Hoy no hay más salidas"));
         else{
           var df=nx-m;
           n.appendChild(el("b","text-3xl font-black tabular-nums",df===0?"Ahora":"en "+df+" min"));
-          n.appendChild(el("span","text-sm font-medium","Sale a las "+fmt(nx)));
+          n.appendChild(el("span","text-sm font-medium text-white/70","Sale a las "+fmt(nx)));
         }
         body.appendChild(n);
       }
       if(!list.length){
-        body.appendChild(el("p","rounded-xl border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400","Sin servicio: "+DL[view].toLowerCase()+"."));
+        body.appendChild(el("p",EMPTY,"Sin servicio: "+DL[view].toLowerCase()+"."));
       }else{
         var g=el("div","grid grid-cols-4 gap-1.5 sm:grid-cols-6"),mark=false;
         list.forEach(function(t){
-          var c="rounded-lg bg-zinc-100 py-1.5 text-center text-sm font-semibold tabular-nums dark:bg-zinc-800";
-          if(isToday){if(t<m)c+=" opacity-40";else if(!mark){c="rounded-lg bg-amber-300 py-1.5 text-center text-sm font-semibold tabular-nums text-zinc-900";mark=true}}
+          var c="rounded-xl py-1.5 text-center text-sm font-semibold tabular-nums ";
+          c+="bg-white/10";
+          if(isToday){if(t<m)c+=" opacity-40";else if(!mark){c="rounded-xl py-1.5 text-center text-sm font-bold tabular-nums bg-amber-300 text-zinc-900";mark=true}}
           g.appendChild(el("span",c,fmt(t)));
         });
         body.appendChild(g);
       }
     }
-    card.appendChild(body);
-    var b=el("button","mt-4 w-full rounded-xl bg-amber-400 py-3.5 text-base font-bold text-zinc-900 transition active:scale-[.98]","🚌 Camión en el andén");
+    in_.appendChild(body);
+    var b=el("button","mt-4 w-full rounded-2xl bg-white/15 py-3.5 text-base font-bold ring-1 ring-white/25 backdrop-blur transition active:scale-[.98]","Camión en el andén");
     b.type="button";b.onclick=function(){notificarLlegada(r.id,i)};
-    card.appendChild(b);
+    in_.appendChild(b);
+    card.appendChild(in_);
     box.appendChild(card);
   });
 }
