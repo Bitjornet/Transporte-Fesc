@@ -35,13 +35,19 @@ var ROUTES=[
 var DL={week:"Lunes a viernes",sat:"Sábado",sun:"Domingo"};
 
 // ====== CONFIGURACIÓN ======
-var SUPABASE_URL="https://TU-PROYECTO.supabase.co"; // Project URL de Supabase
-var SUPABASE_KEY="TU-CLAVE-ANON";                   // clave pública (anon / publishable); protégela con RLS
+var SUPABASE_URL="https://dgajvyumnkyoybckgmpv.supabase.co";       // Project URL, ej. https://abcd1234.supabase.co
+var SUPABASE_ANON_KEY="sb_publishable_9daC4r-G5lJElt6a-wvNbw_SYm4L0v0";  // clave pública (anon o publishable); protégela con RLS
 var COOLDOWN_MIN=5;      // minutos entre reportes "Camión en el andén" (por ruta y sentido)
 var EARLY_MIN=15;        // un reporte hasta 15 min antes de la salida cuenta como llegada
 var LATE_SEVERE_MIN=15;  // más de 15 min de retraso = alerta severa
 var LATE_MAX_MIN=30;     // pasados 30 min la alerta deja de mostrarse
 var COMENT_CD_SEG=60;    // segundos entre comentarios desde el mismo dispositivo
+
+// Cliente de Supabase. Si falta la librería o las claves, la página sigue funcionando en modo local.
+var db=null;
+try{
+  if(window.supabase&&SUPABASE_URL&&SUPABASE_ANON_KEY)db=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+}catch(e){console.error("Supabase no se pudo iniciar:",e)}
 
 // ====== UTILIDADES ======
 function toMin(h){var p=h.split(":");return +p[0]*60+ +p[1]}
@@ -170,14 +176,30 @@ function cooldownLeft(rutaId,sentido){ // minutos que faltan (0 = ya puede repor
   return left>0?Math.ceil(left/60000):0;
 }
 
-// ====== TIEMPO REAL (pendiente de conectar la base de datos) ======
-function notificarLlegada(rutaId,sentido){
+// ====== TIEMPO REAL: reportes de llegada (Supabase, tabla "reportes") ======
+function toast(txt){
+  var t=el("div","fixed left-1/2 z-50 w-[90%] max-w-sm -translate-x-1/2 rounded-2xl bg-red-600 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg",txt);
+  t.style.bottom="max(1rem, env(safe-area-inset-bottom))";
+  t.setAttribute("role","alert");document.body.appendChild(t);
+  setTimeout(function(){t.remove()},4000);
+}
+async function notificarLlegada(rutaId,sentido){
   if(cooldownLeft(rutaId,sentido))return;
-  var ahora=new Date();
-  lsSet(repKey(rutaId,sentido),String(ahora.getTime()));
-  console.log("[notificarLlegada] ruta:",rutaId,"| sentido:",sentido,"| hora:",ahora.toLocaleTimeString("es-MX"),"| ISO:",ahora.toISOString());
-  // TODO: enviar { rutaId, sentido, timestamp } a la base de datos para que lo vean todos.
+  var ahora=new Date(),k=repKey(rutaId,sentido);
+  lsSet(k,String(ahora.getTime()));  // bloquea el botón al instante (cooldown)
   renderDirs();
+  console.log("[notificarLlegada] ruta:",rutaId,"| sentido:",sentido,"| hora:",ahora.toLocaleTimeString("es-MX"));
+  if(!db){console.warn("Supabase sin configurar: el reporte solo se guardó en este dispositivo.");return}
+  try{
+    // created_at lo pone el servidor (default now()), así no depende del reloj del teléfono
+    var res=await db.from("reportes").insert({ruta_id:rutaId,sentido:sentido});
+    if(res.error)throw res.error;
+  }catch(e){
+    console.error("notificarLlegada:",e);
+    try{localStorage.removeItem(k)}catch(_){}   // si falló, devolvemos el botón para reintentar
+    renderDirs();
+    toast("No se pudo enviar el reporte. Intenta de nuevo.");
+  }
 }
 
 // ====== BUZÓN DE COMENTARIOS ANÓNIMOS (Supabase) ======
@@ -192,13 +214,11 @@ async function enviarComentario(){
   if(mensaje.length>500)return msgComentario("El comentario es muy largo (máximo 500 caracteres).",false);
   var wait=Math.ceil((COMENT_CD_SEG*1000-(Date.now()-(+lsGet("fesc:coment")||0)))/1000);
   if(wait>0&&wait<=COMENT_CD_SEG)return msgComentario("Espera "+wait+" s para enviar otro comentario.",false);
-  if(SUPABASE_URL.indexOf("TU-PROYECTO")>-1)return msgComentario("El buzón aún no está configurado.",false);
+  if(!db)return msgComentario("El buzón aún no está configurado.",false);
   b.disabled=true;
   try{
-    var headers={"Content-Type":"application/json","apikey":SUPABASE_KEY,"Prefer":"return=minimal"};
-    if(SUPABASE_KEY.indexOf("eyJ")===0)headers.Authorization="Bearer "+SUPABASE_KEY; // clave anon clásica (JWT)
-    var res=await fetch(SUPABASE_URL+"/rest/v1/comentarios",{method:"POST",headers:headers,body:JSON.stringify({mensaje:mensaje})});
-    if(!res.ok)throw new Error("HTTP "+res.status);
+    var res=await db.from("comentarios").insert({mensaje:mensaje});
+    if(res.error)throw res.error;
     ta.value="";lsSet("fesc:coment",String(Date.now()));
     msgComentario("¡Gracias! Tu comentario se envió de forma anónima.",true);
   }catch(e){
