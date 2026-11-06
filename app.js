@@ -34,6 +34,15 @@ var ROUTES=[
 ];
 var DL={week:"Lunes a viernes",sat:"Sábado",sun:"Domingo"};
 
+// ====== CONFIGURACIÓN ======
+var SUPABASE_URL="https://TU-PROYECTO.supabase.co"; // Project URL de Supabase
+var SUPABASE_KEY="TU-CLAVE-ANON";                   // clave pública (anon / publishable); protégela con RLS
+var COOLDOWN_MIN=5;      // minutos entre reportes "Camión en el andén" (por ruta y sentido)
+var EARLY_MIN=15;        // un reporte hasta 15 min antes de la salida cuenta como llegada
+var LATE_SEVERE_MIN=15;  // más de 15 min de retraso = alerta severa
+var LATE_MAX_MIN=30;     // pasados 30 min la alerta deja de mostrarse
+var COMENT_CD_SEG=60;    // segundos entre comentarios desde el mismo dispositivo
+
 // ====== UTILIDADES ======
 function toMin(h){var p=h.split(":");return +p[0]*60+ +p[1]}
 function fmt(m){return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0")}
@@ -76,11 +85,18 @@ function render(){
   renderDirs();
 }
 
+// Estilos del botón de llegada según estado
+var BTN_A="mt-4 w-full rounded-2xl py-3.5 text-base font-bold transition ";
+var BTN_NORMAL=BTN_A+"bg-amber-400 text-zinc-900 active:scale-[.98]";
+var BTN_LATE=BTN_A+"bg-red-600 text-white ring-1 ring-red-300/40 active:scale-[.98]";
+var BTN_SEVERE=BTN_A+"animate-pulse bg-red-700 text-white ring-2 ring-red-300 active:scale-[.98]";
+var BTN_DONE=BTN_A+"cursor-not-allowed bg-white/5 text-white/40 ring-1 ring-white/10";
+
 function renderDirs(){
   var r=route(),box=$("dirs"),realDay=dk(new Date()),m=nowMin(),isToday=(view===realDay);
   box.textContent="";
   r.dirs.forEach(function(d,i){
-    var num="0"+(i+1);
+    var num="0"+(i+1),late=0; // late: 0 = a tiempo, 1 = retrasado, 2 = retraso severo
     var card=el("article","relative overflow-hidden rounded-3xl bg-gradient-to-br "+GRAD[r.campus]+" p-5 ring-1 ring-white/10");
     card.appendChild(el("span","pointer-events-none absolute -bottom-4 right-3 select-none text-8xl font-black text-white/10",num));
     var in_=el("div","relative");
@@ -93,8 +109,15 @@ function renderDirs(){
       body.appendChild(el("p",EMPTY,d.x));
     }else{
       var list=tm(view==="sat"?d.s:view==="week"?d.w:"");
-      // Contador: solo si el día seleccionado es el día real del dispositivo
+      // Contador y alerta de retraso: solo si el día seleccionado es el día real del dispositivo
       if(isToday){
+        // Retraso: la última salida programada ya pasó y no hay reporte de llegada reciente
+        var last=null;list.forEach(function(t){if(t<=m)last=t});
+        if(last!==null){
+          var ago=m-last,dep=new Date();dep.setHours(0,last,0,0);
+          var reported=lastReport(r.id,i)>=dep.getTime()-EARLY_MIN*60000;
+          if(ago>=1&&ago<=LATE_MAX_MIN&&!reported)late=ago>LATE_SEVERE_MIN?2:1;
+        }
         var n=el("div","mb-3 flex flex-wrap items-baseline gap-x-3 rounded-2xl bg-black/25 px-4 py-3 ring-1 ring-white/10");
         var nx=list.filter(function(t){return t>=m})[0];
         if(!list.length)n.appendChild(el("span","text-sm font-medium","Hoy no hay servicio"));
@@ -111,8 +134,7 @@ function renderDirs(){
       }else{
         var g=el("div","grid grid-cols-4 gap-1.5 sm:grid-cols-6"),mark=false;
         list.forEach(function(t){
-          var c="rounded-xl py-1.5 text-center text-sm font-semibold tabular-nums ";
-          c+="bg-white/10";
+          var c="rounded-xl py-1.5 text-center text-sm font-semibold tabular-nums bg-white/10";
           if(isToday){if(t<m)c+=" opacity-40";else if(!mark){c="rounded-xl py-1.5 text-center text-sm font-bold tabular-nums bg-amber-300 text-zinc-900";mark=true}}
           g.appendChild(el("span",c,fmt(t)));
         });
@@ -120,19 +142,69 @@ function renderDirs(){
       }
     }
     in_.appendChild(body);
-    var b=el("button","mt-4 w-full rounded-2xl bg-white/15 py-3.5 text-base font-bold ring-1 ring-white/25 backdrop-blur transition active:scale-[.98]","Camión en el andén");
-    b.type="button";b.onclick=function(){notificarLlegada(r.id,i)};
+
+    // Botón de llegada: enfriamiento (gris) > retraso (rojo) > normal (amarillo)
+    var left=cooldownLeft(r.id,i),b;
+    if(left){
+      b=el("button",BTN_DONE,"✔ Reportado · otro reporte en "+left+" min");
+      b.disabled=true;
+    }else{
+      b=el("button",late===2?BTN_SEVERE:late===1?BTN_LATE:BTN_NORMAL,
+        late===2?"⚠️ Posible cancelación / Retraso severo":late===1?"🔴 Camión retrasado":"🚌 Camión en el andén");
+      b.onclick=function(){notificarLlegada(r.id,i)};
+    }
+    b.type="button";
     in_.appendChild(b);
     card.appendChild(in_);
     box.appendChild(card);
   });
 }
 
-// ====== TIEMPO REAL (pendiente de conectar Firebase o Supabase) ======
+// ====== REPORTES DE LLEGADA (cooldown con localStorage) ======
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function repKey(rutaId,sentido){return "fesc:rep:"+rutaId+":"+sentido}
+function lastReport(rutaId,sentido){var t=+lsGet(repKey(rutaId,sentido))||0;return t>Date.now()?0:t}
+function cooldownLeft(rutaId,sentido){ // minutos que faltan (0 = ya puede reportar)
+  var left=COOLDOWN_MIN*60000-(Date.now()-lastReport(rutaId,sentido));
+  return left>0?Math.ceil(left/60000):0;
+}
+
+// ====== TIEMPO REAL (pendiente de conectar la base de datos) ======
 function notificarLlegada(rutaId,sentido){
+  if(cooldownLeft(rutaId,sentido))return;
   var ahora=new Date();
+  lsSet(repKey(rutaId,sentido),String(ahora.getTime()));
   console.log("[notificarLlegada] ruta:",rutaId,"| sentido:",sentido,"| hora:",ahora.toLocaleTimeString("es-MX"),"| ISO:",ahora.toISOString());
-  // TODO: enviar a la base de datos, por ejemplo { rutaId, sentido, timestamp }.
+  // TODO: enviar { rutaId, sentido, timestamp } a la base de datos para que lo vean todos.
+  renderDirs();
+}
+
+// ====== BUZÓN DE COMENTARIOS ANÓNIMOS (Supabase) ======
+function msgComentario(txt,ok){
+  var s=$("coment-msg");s.textContent=txt;
+  s.className="mt-3 text-sm font-medium "+(ok?"text-emerald-300":"text-red-300");
+  clearTimeout(msgComentario.t);msgComentario.t=setTimeout(function(){s.textContent=""},5000);
+}
+async function enviarComentario(){
+  var ta=$("coment-txt"),b=$("coment-btn"),mensaje=ta.value.trim();
+  if(!mensaje)return msgComentario("Escribe un comentario antes de enviar.",false);
+  if(mensaje.length>500)return msgComentario("El comentario es muy largo (máximo 500 caracteres).",false);
+  var wait=Math.ceil((COMENT_CD_SEG*1000-(Date.now()-(+lsGet("fesc:coment")||0)))/1000);
+  if(wait>0&&wait<=COMENT_CD_SEG)return msgComentario("Espera "+wait+" s para enviar otro comentario.",false);
+  if(SUPABASE_URL.indexOf("TU-PROYECTO")>-1)return msgComentario("El buzón aún no está configurado.",false);
+  b.disabled=true;
+  try{
+    var headers={"Content-Type":"application/json","apikey":SUPABASE_KEY,"Prefer":"return=minimal"};
+    if(SUPABASE_KEY.indexOf("eyJ")===0)headers.Authorization="Bearer "+SUPABASE_KEY; // clave anon clásica (JWT)
+    var res=await fetch(SUPABASE_URL+"/rest/v1/comentarios",{method:"POST",headers:headers,body:JSON.stringify({mensaje:mensaje})});
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    ta.value="";lsSet("fesc:coment",String(Date.now()));
+    msgComentario("¡Gracias! Tu comentario se envió de forma anónima.",true);
+  }catch(e){
+    console.error("enviarComentario:",e);
+    msgComentario("No se pudo enviar. Intenta de nuevo en un momento.",false);
+  }finally{b.disabled=false}
 }
 
 function tick(){
@@ -140,4 +212,5 @@ function tick(){
   $("clock").textContent=n.toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long"})+" · "+fmt(nowMin());
   renderDirs();
 }
-render();tick();setInterval(tick,30000);
+$("coment-btn").onclick=enviarComentario;
+render();tick();setInterval(tick,15000);
