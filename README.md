@@ -7,7 +7,7 @@ Página web para consultar los horarios del transporte de la FES Cuautitlán (UN
 - Tarifas, andenes, dársenas y paradas.
 - Funciona en celular y en computadora, con modo claro y oscuro.
 
-**Sitio:** https://bitjornet.github.io/Transporte-Fesc/
+**Sitio:** https://soyfesc.live
 
 ## Fuente
 

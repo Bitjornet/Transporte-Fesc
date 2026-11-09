@@ -35,12 +35,14 @@ var ROUTES=[
 var DL={week:"Lunes a viernes",sat:"Sábado",sun:"Domingo"};
 
 // ====== CONFIGURACIÓN ======
-var SUPABASE_URL="https://dgajvyumnkyoybckgmpv.supabase.co";       // Project URL, ej. https://abcd1234.supabase.co
-var SUPABASE_ANON_KEY="sb_publishable_9daC4r-G5lJElt6a-wvNbw_SYm4L0v0";  // clave pública (anon o publishable); protégela con RLS
+var SUPABASE_URL="";       // Project URL, ej. https://abcd1234.supabase.co
+var SUPABASE_ANON_KEY="";  // clave pública (anon o publishable); protégela con RLS
 var COOLDOWN_MIN=5;      // minutos entre reportes "Camión en el andén" (por ruta y sentido)
 var EARLY_MIN=15;        // un reporte hasta 15 min antes de la salida cuenta como llegada
 var LATE_SEVERE_MIN=15;  // más de 15 min de retraso = alerta severa
-var LATE_MAX_MIN=30;     // pasados 30 min la alerta deja de mostrarse
+var CANCEL_MIN=20;       // más de 20 min sin reporte de llegada = se da por cancelada la salida
+var CANCEL_SHOW_MIN=60;  // cuánto tiempo se muestra el aviso de salida cancelada
+var REPORT_VENTANA_MIN=180; // cuánto tiempo se conservan los reportes compartidos en memoria
 var COMENT_CD_SEG=60;    // segundos entre comentarios desde el mismo dispositivo
 
 // Cliente de Supabase. Si falta la librería o las claves, la página sigue funcionando en modo local.
@@ -97,6 +99,8 @@ var BTN_NORMAL=BTN_A+"bg-amber-400 text-zinc-900 active:scale-[.98]";
 var BTN_LATE=BTN_A+"bg-red-600 text-white ring-1 ring-red-300/40 active:scale-[.98]";
 var BTN_SEVERE=BTN_A+"animate-pulse bg-red-700 text-white ring-2 ring-red-300 active:scale-[.98]";
 var BTN_DONE=BTN_A+"cursor-not-allowed bg-white/5 text-white/40 ring-1 ring-white/10";
+var BTN_SEC="mt-2 w-full rounded-2xl bg-white/15 py-3 text-sm font-semibold ring-1 ring-white/25 transition active:scale-[.98]";
+var BTN_SEC_DONE="mt-2 w-full cursor-not-allowed rounded-2xl bg-white/5 py-3 text-sm font-semibold text-white/40 ring-1 ring-white/10";
 
 function renderDirs(){
   var r=route(),box=$("dirs"),realDay=dk(new Date()),m=nowMin(),isToday=(view===realDay);
@@ -117,13 +121,7 @@ function renderDirs(){
       var list=tm(view==="sat"?d.s:view==="week"?d.w:"");
       // Contador y alerta de retraso: solo si el día seleccionado es el día real del dispositivo
       if(isToday){
-        // Retraso: la última salida programada ya pasó y no hay reporte de llegada reciente
-        var last=null;list.forEach(function(t){if(t<=m)last=t});
-        if(last!==null){
-          var ago=m-last,dep=new Date();dep.setHours(0,last,0,0);
-          var reported=lastReport(r.id,i)>=dep.getTime()-EARLY_MIN*60000;
-          if(ago>=1&&ago<=LATE_MAX_MIN&&!reported)late=ago>LATE_SEVERE_MIN?2:1;
-        }
+        var st=estado(r,i,d);late=st.late; // retraso: la última salida ya pasó y nadie reportó llegada
         var n=el("div","mb-3 flex flex-wrap items-baseline gap-x-3 rounded-2xl bg-black/25 px-4 py-3 ring-1 ring-white/10");
         var nx=list.filter(function(t){return t>=m})[0];
         if(!list.length)n.appendChild(el("span","text-sm font-medium","Hoy no hay servicio"));
@@ -134,6 +132,9 @@ function renderDirs(){
           n.appendChild(el("span","text-sm font-medium text-white/70","Sale a las "+fmt(nx)));
         }
         body.appendChild(n);
+        if(st.cancelled!==null)body.appendChild(el("p","mb-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-100 ring-1 ring-red-300/30","Se dio por cancelada la salida de las "+fmt(st.cancelled)+" (sin reporte de llegada)."+(nx!=null?" Sigue la de las "+fmt(nx)+".":"")));
+        var resumen=infoReportes(r.id,i);
+        if(resumen)body.appendChild(el("p","mb-3 text-sm font-medium text-white/80",resumen));
       }
       if(!list.length){
         body.appendChild(el("p",EMPTY,"Sin servicio: "+DL[view].toLowerCase()+"."));
@@ -141,7 +142,7 @@ function renderDirs(){
         var g=el("div","grid grid-cols-4 gap-1.5 sm:grid-cols-6"),mark=false;
         list.forEach(function(t){
           var c="rounded-xl py-1.5 text-center text-sm font-semibold tabular-nums bg-white/10";
-          if(isToday){if(t<m)c+=" opacity-40";else if(!mark){c="rounded-xl py-1.5 text-center text-sm font-bold tabular-nums bg-amber-300 text-zinc-900";mark=true}}
+          if(isToday){if(t<m)c+=" opacity-40"+(t===st.cancelled?" line-through":"");else if(!mark){c="rounded-xl py-1.5 text-center text-sm font-bold tabular-nums bg-amber-300 text-zinc-900";mark=true}}
           g.appendChild(el("span",c,fmt(t)));
         });
         body.appendChild(g);
@@ -149,18 +150,28 @@ function renderDirs(){
     }
     in_.appendChild(body);
 
-    // Botón de llegada: enfriamiento (gris) > retraso (rojo) > normal (amarillo)
-    var left=cooldownLeft(r.id,i),b;
-    if(left){
-      b=el("button",BTN_DONE,"✔ Reportado · otro reporte en "+left+" min");
-      b.disabled=true;
+    // Botón principal: en retraso reporta la alerta (rojo); si no, reporta llegada (amarillo). Enfriamiento = gris.
+    var gL=cooldownLeft(r.id,i,"llegada"),gA=cooldownLeft(r.id,i,"alerta"),b;
+    if(late){
+      var tipoAlerta=late===2?"posible_cancelacion":"retraso";
+      if(gA){b=el("button",BTN_DONE,"✔ Reporte enviado · otro en "+gA+" min");b.disabled=true}
+      else{
+        b=el("button",late===2?BTN_SEVERE:BTN_LATE,late===2?"⚠️ Posible cancelación / Retraso severo":"🔴 Camión retrasado");
+        b.onclick=function(){notificarLlegada(r.id,i,tipoAlerta)};
+      }
+    }else if(gL){
+      b=el("button",BTN_DONE,"✔ Reportado · otro reporte en "+gL+" min");b.disabled=true;
     }else{
-      b=el("button",late===2?BTN_SEVERE:late===1?BTN_LATE:BTN_NORMAL,
-        late===2?"⚠️ Posible cancelación / Retraso severo":late===1?"🔴 Camión retrasado":"🚌 Camión en el andén");
-      b.onclick=function(){notificarLlegada(r.id,i)};
+      b=el("button",BTN_NORMAL,"🚌 Camión en el andén");
+      b.onclick=function(){notificarLlegada(r.id,i,"llegada")};
     }
-    b.type="button";
-    in_.appendChild(b);
+    b.type="button";in_.appendChild(b);
+    if(late){ // con retraso también se puede avisar que el camión ya llegó
+      var s2=gL?el("button",BTN_SEC_DONE,"✔ Llegada reportada"):el("button",BTN_SEC,"🚌 Ya llegó el camión");
+      s2.type="button";
+      if(gL)s2.disabled=true;else s2.onclick=function(){notificarLlegada(r.id,i,"llegada")};
+      in_.appendChild(s2);
+    }
     card.appendChild(in_);
     box.appendChild(card);
   });
@@ -169,30 +180,55 @@ function renderDirs(){
 // ====== REPORTES DE LLEGADA (cooldown con localStorage) ======
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function repKey(rutaId,sentido){return "fesc:rep:"+rutaId+":"+sentido}
-function lastReport(rutaId,sentido){var t=+lsGet(repKey(rutaId,sentido))||0;return t>Date.now()?0:t}
-function cooldownLeft(rutaId,sentido){ // minutos que faltan (0 = ya puede reportar)
-  var left=COOLDOWN_MIN*60000-(Date.now()-lastReport(rutaId,sentido));
+function repKey(rutaId,sentido,grupo){return "fesc:rep:"+rutaId+":"+sentido+":"+(grupo||"llegada")}
+function lastReport(rutaId,sentido,grupo){var t=+lsGet(repKey(rutaId,sentido,grupo))||0;return t>Date.now()?0:t}
+function cooldownLeft(rutaId,sentido,grupo){ // minutos que faltan (0 = ya puede reportar)
+  var left=COOLDOWN_MIN*60000-(Date.now()-lastReport(rutaId,sentido,grupo));
   return left>0?Math.ceil(left/60000):0;
 }
+// Horarios de HOY (en minutos) de un sentido
+function horariosHoy(d){var k=dk(new Date());return d.x?[]:tm(k==="sat"?d.s:k==="week"?d.w:"")}
+// Estado en vivo: última salida pasada, próxima salida y nivel de retraso (0 a tiempo, 1 retrasado, 2 severo)
+function estado(r,i,d){
+  var list=horariosHoy(d),m=nowMin(),last=null,next=null,late=0,cancelled=null;
+  list.forEach(function(t){if(t<=m)last=t;if(next==null&&t>=m)next=t});
+  if(last!==null){
+    var ago=m-last,dep=new Date();dep.setHours(0,last,0,0);
+    var arrived=lastReport(r.id,i,"llegada")>=dep.getTime()-EARLY_MIN*60000||llegadaCompartida(r.id,i,last,dep.getTime());
+    if(ago>=1&&!arrived){
+      if(ago<=CANCEL_MIN)late=ago>LATE_SEVERE_MIN?2:1;   // 1-15 min retrasado, 16-20 posible cancelación
+      else if(ago<=CANCEL_SHOW_MIN)cancelled=last;        // más de 20 min: se da por cancelada
+    }
+  }
+  return {late:late,last:last,next:next,cancelled:cancelled};
+}
 
-// ====== TIEMPO REAL: reportes de llegada (Supabase, tabla "reportes") ======
+// ====== TIEMPO REAL: reportes (Supabase, tabla "reportes") ======
 function toast(txt){
   var t=el("div","fixed left-1/2 z-50 w-[90%] max-w-sm -translate-x-1/2 rounded-2xl bg-red-600 px-4 py-3 text-center text-sm font-semibold text-white shadow-lg",txt);
   t.style.bottom="max(1rem, env(safe-area-inset-bottom))";
   t.setAttribute("role","alert");document.body.appendChild(t);
   setTimeout(function(){t.remove()},4000);
 }
-async function notificarLlegada(rutaId,sentido){
-  if(cooldownLeft(rutaId,sentido))return;
-  var ahora=new Date(),k=repKey(rutaId,sentido);
+// tipo: "llegada" | "retraso" | "posible_cancelacion"
+async function notificarLlegada(rutaId,sentido,tipo){
+  tipo=tipo||"llegada";
+  var grupo=tipo==="llegada"?"llegada":"alerta";
+  if(cooldownLeft(rutaId,sentido,grupo))return;
+  var r=ROUTES.filter(function(x){return x.id===rutaId})[0],d=r&&r.dirs[sentido];
+  var st=d?estado(r,sentido,d):{late:0,last:null,next:null};   // antes de guardar el cooldown
+  // Horario programado al que se refiere el reporte:
+  // alerta o llegada tardía -> la salida retrasada; llegada normal -> la próxima salida
+  var hm=tipo!=="llegada"?st.last:(st.late?st.last:(st.next!=null?st.next:st.last));
+  var hora=(hm==null)?null:fmt(hm);
+  var ahora=new Date(),k=repKey(rutaId,sentido,grupo);
   lsSet(k,String(ahora.getTime()));  // bloquea el botón al instante (cooldown)
   renderDirs();
-  console.log("[notificarLlegada] ruta:",rutaId,"| sentido:",sentido,"| hora:",ahora.toLocaleTimeString("es-MX"));
+  console.log("[notificarLlegada]",tipo,"| ruta:",rutaId,"| sentido:",sentido,"| horario:",hora,"| hora:",ahora.toLocaleTimeString("es-MX"));
   if(!db){console.warn("Supabase sin configurar: el reporte solo se guardó en este dispositivo.");return}
   try{
     // created_at lo pone el servidor (default now()), así no depende del reloj del teléfono
-    var res=await db.from("reportes").insert({ruta_id:rutaId,sentido:sentido});
+    var res=await db.from("reportes").insert({ruta_id:rutaId,sentido:sentido,hora_programada:hora,tipo:tipo});
     if(res.error)throw res.error;
   }catch(e){
     console.error("notificarLlegada:",e);
@@ -200,6 +236,52 @@ async function notificarLlegada(rutaId,sentido){
     renderDirs();
     toast("No se pudo enviar el reporte. Intenta de nuevo.");
   }
+}
+
+// ====== REPORTES COMPARTIDOS (lectura + tiempo real) ======
+var compartidos=[],vistos={};
+function guardarReportes(rows){
+  rows.forEach(function(x){
+    if(x.id!=null){if(vistos[x.id])return;vistos[x.id]=1}
+    compartidos.push({ruta:x.ruta_id,sentido:x.sentido,hora:x.hora_programada?String(x.hora_programada).slice(0,5):null,tipo:x.tipo,t:new Date(x.created_at).getTime()});
+  });
+  var corte=Date.now()-REPORT_VENTANA_MIN*60000;
+  compartidos=compartidos.filter(function(x){return x.t>=corte});
+}
+// ¿Algún usuario reportó la llegada de esta salida?
+function llegadaCompartida(rid,i,hm,depTs){
+  var h=fmt(hm);
+  return compartidos.some(function(x){
+    if(x.ruta!==rid||x.sentido!==i||x.tipo!=="llegada")return false;
+    return x.hora?x.hora===h:x.t>=depTs-EARLY_MIN*60000;
+  });
+}
+// Resumen para la tarjeta: última llegada y reportes de retraso de los últimos 30 min
+function infoReportes(rid,i){
+  var ahora=Date.now(),ll=null,al=0,out=[];
+  compartidos.forEach(function(x){
+    if(x.ruta!==rid||x.sentido!==i||ahora-x.t>30*60000)return;
+    if(x.tipo==="llegada"){if(ll===null||x.t>ll)ll=x.t}else al++;
+  });
+  if(ll!==null){var mm=Math.max(0,Math.round((ahora-ll)/60000));out.push("🟢 Camión reportado en el andén "+(mm===0?"ahora":"hace "+mm+" min"))}
+  if(al)out.push("🔴 "+al+(al===1?" reporte":" reportes")+" de retraso o cancelación");
+  return out.join(" · ");
+}
+async function cargarReportes(){
+  if(!db)return;
+  try{
+    var desde=new Date(Date.now()-REPORT_VENTANA_MIN*60000).toISOString();
+    var res=await db.from("reportes").select("id,ruta_id,sentido,hora_programada,tipo,created_at")
+      .gte("created_at",desde).order("created_at",{ascending:true}).limit(500);
+    if(res.error)throw res.error;
+    guardarReportes(res.data||[]);renderDirs();
+  }catch(e){console.warn("No se pudieron leer los reportes:",e)}
+}
+function suscribirReportes(){
+  if(!db)return;
+  db.channel("reportes-en-vivo")
+    .on("postgres_changes",{event:"INSERT",schema:"public",table:"reportes"},function(p){guardarReportes([p.new]);renderDirs()})
+    .subscribe();
 }
 
 // ====== BUZÓN DE COMENTARIOS ANÓNIMOS (Supabase) ======
@@ -234,3 +316,6 @@ function tick(){
 }
 $("coment-btn").onclick=enviarComentario;
 render();tick();setInterval(tick,15000);
+cargarReportes();suscribirReportes();
+setInterval(cargarReportes,120000); // respaldo por si se cae la conexión en vivo
+document.addEventListener("visibilitychange",function(){if(!document.hidden)cargarReportes()});
