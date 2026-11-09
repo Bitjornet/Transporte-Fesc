@@ -35,8 +35,8 @@ var ROUTES=[
 var DL={week:"Lunes a viernes",sat:"Sábado",sun:"Domingo"};
 
 // ====== CONFIGURACIÓN ======
-var SUPABASE_URL="";       // Project URL, ej. https://abcd1234.supabase.co
-var SUPABASE_ANON_KEY="";  // clave pública (anon o publishable); protégela con RLS
+var SUPABASE_URL="https://dgajvyumnkyoybckgmpv.supabase.co";       // Project URL, ej. https://abcd1234.supabase.co
+var SUPABASE_ANON_KEY="sb_publishable_9daC4r-G5lJElt6a-wvNbw_SYm4L0v0";  // clave pública (anon o publishable); protégela con RLS
 var COOLDOWN_MIN=5;      // minutos entre reportes "Camión en el andén" (por ruta y sentido)
 var EARLY_MIN=15;        // un reporte hasta 15 min antes de la salida cuenta como llegada
 var LATE_SEVERE_MIN=15;  // más de 15 min de retraso = alerta severa
